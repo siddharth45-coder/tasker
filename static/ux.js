@@ -4,13 +4,20 @@
   const saveBtn = form?.querySelector(".save-btn");
   let lastFocused = null;
 
-  window.addEventListener("taskflow:modal-open", () => {
-    lastFocused = document.activeElement;
-  });
-
-  window.addEventListener("taskflow:modal-close", () => {
-    if (lastFocused && document.contains(lastFocused)) lastFocused.focus();
-  });
+  if (typeof window.openModal === "function") {
+    const originalOpenModal = window.openModal;
+    window.openModal = (...args) => {
+      lastFocused = document.activeElement;
+      originalOpenModal(...args);
+    };
+  }
+  if (typeof window.closeModal === "function") {
+    const originalCloseModal = window.closeModal;
+    window.closeModal = (...args) => {
+      originalCloseModal(...args);
+      if (lastFocused && document.contains(lastFocused)) lastFocused.focus();
+    };
+  }
 
   if (form && saveBtn) {
     form.addEventListener("submit", () => {
