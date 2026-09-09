@@ -41,6 +41,9 @@ class TaskFlowAppTests(unittest.TestCase):
         )
         self.assertEqual(response.status_code, 302)
 
+    def session_csrf(self):
+        return self.csrf("/")
+
     def test_health_is_public(self):
         response = self.client.get("/health")
         self.assertEqual(response.status_code, 200)
@@ -67,10 +70,9 @@ class TaskFlowAppTests(unittest.TestCase):
 
     def test_create_update_and_delete_task(self):
         self.register()
-        with self.client.session_transaction() as session:
-            token = session["csrf_token"]
-
+        token = self.session_csrf()
         headers = {"X-CSRF-Token": token}
+
         created = self.client.post(
             "/api/tasks",
             json={"title": "Ship QA", "priority": "high", "status": "todo", "project": "Website Redesign"},
@@ -94,9 +96,8 @@ class TaskFlowAppTests(unittest.TestCase):
 
     def test_tasks_are_isolated_between_users(self):
         self.register("one@example.com")
-        with self.client.session_transaction() as session:
-            first_user_id = session["user_id"]
-            token = session["csrf_token"]
+        first_user_id = self.client.get("/api/me").json["user"]["id"]
+        token = self.session_csrf()
 
         created = self.client.post(
             "/api/tasks",
@@ -108,9 +109,9 @@ class TaskFlowAppTests(unittest.TestCase):
 
         self.client.post("/logout", data={"csrf_token": token})
         self.register("two@example.com")
-        with self.client.session_transaction() as session:
-            self.assertNotEqual(first_user_id, session["user_id"])
-            second_token = session["csrf_token"]
+        second_user_id = self.client.get("/api/me").json["user"]["id"]
+        self.assertNotEqual(first_user_id, second_user_id)
+        second_token = self.session_csrf()
 
         tasks = self.client.get("/api/tasks")
         self.assertEqual(tasks.status_code, 200)
