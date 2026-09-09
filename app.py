@@ -1,4 +1,5 @@
 import os
+import secrets
 import sqlite3
 from datetime import date, timedelta
 from functools import wraps
@@ -10,7 +11,11 @@ DB_DIR = os.path.join(BASE_DIR, "database")
 DB_PATH = os.path.join(DB_DIR, "tasker.db")
 
 app = Flask(__name__)
-app.config["SECRET_KEY"] = os.environ.get("SECRET_KEY", "tasker-dev-change-me")
+debug = os.environ.get("FLASK_DEBUG", "0") == "1"
+secret_key = os.environ.get("SECRET_KEY")
+if not secret_key and not debug:
+    raise RuntimeError("SECRET_KEY must be set when FLASK_DEBUG is not enabled")
+app.config["SECRET_KEY"] = secret_key or "tasker-dev-change-me"
 app.config["SESSION_COOKIE_HTTPONLY"] = True
 app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
 app.config["SESSION_COOKIE_SECURE"] = os.environ.get("COOKIE_SECURE", "0") == "1"
@@ -110,12 +115,31 @@ def seed_tasks(user_id):
     db.commit()
 
 
+@app.context_processor
+def inject_security_context():
+    if "csrf_token" not in session:
+        session["csrf_token"] = secrets.token_urlsafe(32)
+    return {"csrf_token": session["csrf_token"]}
+
+
+@app.before_request
+def csrf_protect():
+    if request.method in {"POST", "PUT", "PATCH", "DELETE"} and request.endpoint != "health":
+        token = request.form.get("csrf_token") or request.headers.get("X-CSRF-Token")
+        if not token or not secrets.compare_digest(token, session.get("csrf_token", "")):
+            if request.path.startswith("/api/"):
+                return jsonify({"error": "CSRF validation failed"}), 403
+            return "CSRF validation failed", 403
+
+
 @app.after_request
 def security_headers(response):
     response.headers.setdefault("X-Content-Type-Options", "nosniff")
     response.headers.setdefault("X-Frame-Options", "SAMEORIGIN")
     response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
     response.headers.setdefault("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
+    if request.is_secure:
+        response.headers.setdefault("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
     return response
 
 
@@ -269,4 +293,4 @@ with app.app_context():
     init_db()
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)), debug=os.environ.get("FLASK_DEBUG", "0") == "1")
+    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)), debug=debug)
