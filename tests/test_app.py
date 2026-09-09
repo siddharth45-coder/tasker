@@ -20,22 +20,23 @@ class TaskFlowAppTests(unittest.TestCase):
         self.client = tasker.app.test_client()
 
     def tearDown(self):
-        try:
-            os.unlink(self.db_file.name)
-        except FileNotFoundError:
-            pass
+        for path in (self.db_file.name, self.db_file.name + "-wal", self.db_file.name + "-shm"):
+            try:
+                os.unlink(path)
+            except FileNotFoundError:
+                pass
 
-    def csrf(self):
-        response = self.client.get("/register")
+    def csrf(self, path="/register"):
+        response = self.client.get(path)
         self.assertEqual(response.status_code, 200)
         with self.client.session_transaction() as session:
             return session["csrf_token"]
 
-    def register(self):
+    def register(self, email="test@example.com"):
         token = self.csrf()
         response = self.client.post(
             "/register",
-            data={"name": "Test User", "email": "test@example.com", "password": "secret123", "csrf_token": token},
+            data={"name": "Test User", "email": email, "password": "secret123", "csrf_token": token},
             follow_redirects=False,
         )
         self.assertEqual(response.status_code, 302)
@@ -54,6 +55,14 @@ class TaskFlowAppTests(unittest.TestCase):
     def test_api_mutation_requires_csrf(self):
         self.register()
         response = self.client.post("/api/tasks", json={"title": "Blocked"})
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.json["error"], "CSRF validation failed")
+
+    def test_auth_mutation_requires_csrf(self):
+        response = self.client.post(
+            "/register",
+            data={"name": "Blocked", "email": "blocked@example.com", "password": "secret123"},
+        )
         self.assertEqual(response.status_code, 403)
 
     def test_create_update_and_delete_task(self):
@@ -82,6 +91,37 @@ class TaskFlowAppTests(unittest.TestCase):
         deleted = self.client.delete(f"/api/tasks/{task_id}", headers=headers)
         self.assertEqual(deleted.status_code, 200)
         self.assertTrue(deleted.json["ok"])
+
+    def test_tasks_are_isolated_between_users(self):
+        self.register("one@example.com")
+        with self.client.session_transaction() as session:
+            first_user_id = session["user_id"]
+            token = session["csrf_token"]
+
+        created = self.client.post(
+            "/api/tasks",
+            json={"title": "Private task"},
+            headers={"X-CSRF-Token": token},
+        )
+        self.assertEqual(created.status_code, 201)
+        task_id = created.json["task"]["id"]
+
+        self.client.post("/logout", data={"csrf_token": token})
+        self.register("two@example.com")
+        with self.client.session_transaction() as session:
+            self.assertNotEqual(first_user_id, session["user_id"])
+            second_token = session["csrf_token"]
+
+        tasks = self.client.get("/api/tasks")
+        self.assertEqual(tasks.status_code, 200)
+        self.assertTrue(all(task["title"] != "Private task" for task in tasks.json["tasks"]))
+
+        response = self.client.put(
+            f"/api/tasks/{task_id}",
+            json={"title": "Hijacked"},
+            headers={"X-CSRF-Token": second_token},
+        )
+        self.assertEqual(response.status_code, 404)
 
 
 if __name__ == "__main__":
