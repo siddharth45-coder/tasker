@@ -40,6 +40,9 @@ class TaskFlowAppTests(unittest.TestCase):
             follow_redirects=False,
         )
         self.assertEqual(response.status_code, 302)
+        # Login/registration rotates the session, so fetch the dashboard once
+        # to let the context processor issue the fresh CSRF token.
+        self.client.get("/")
 
     def session_csrf(self):
         return self.csrf("/")
