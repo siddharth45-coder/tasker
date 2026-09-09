@@ -4,20 +4,10 @@
   const saveBtn = form?.querySelector(".save-btn");
   let lastFocused = null;
 
-  if (typeof window.openModal === "function") {
-    const originalOpenModal = window.openModal;
-    window.openModal = (...args) => {
-      lastFocused = document.activeElement;
-      originalOpenModal(...args);
-    };
-  }
-  if (typeof window.closeModal === "function") {
-    const originalCloseModal = window.closeModal;
-    window.closeModal = (...args) => {
-      originalCloseModal(...args);
-      if (lastFocused && document.contains(lastFocused)) lastFocused.focus();
-    };
-  }
+  document.addEventListener("pointerdown", (event) => {
+    const opener = event.target.closest("#newTaskBtn,#newTaskTop,#emptyAddTask,.task-card,.calendar-task");
+    if (opener) lastFocused = opener;
+  }, true);
 
   if (form && saveBtn) {
     form.addEventListener("submit", () => {
@@ -26,24 +16,28 @@
       saveBtn.textContent = "Saving...";
       saveBtn.setAttribute("aria-busy", "true");
     }, { capture: true });
-
     const observer = new MutationObserver(() => {
       if (!modal || modal.classList.contains("hidden")) {
         saveBtn.disabled = false;
         saveBtn.textContent = saveBtn.dataset.originalText || "Save task";
         saveBtn.removeAttribute("aria-busy");
+        if (lastFocused && document.contains(lastFocused)) setTimeout(() => lastFocused.focus(), 0);
       }
     });
     if (modal) observer.observe(modal, { attributes: true, attributeFilter: ["class"] });
   }
 
   document.addEventListener("keydown", (event) => {
-    if (!modal || modal.classList.contains("hidden") || event.key !== "Tab") return;
-    const focusable = [...modal.querySelectorAll("button:not([disabled]), input:not([disabled]), textarea:not([disabled]), select:not([disabled])")]
-      .filter(el => el.offsetParent !== null);
-    if (!focusable.length) return;
-    const first = focusable[0], last = focusable[focusable.length - 1];
-    if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
-    else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
+    if (!modal || modal.classList.contains("hidden")) return;
+    if (event.key === "Tab") {
+      const focusable = [...modal.querySelectorAll("button:not([disabled]), input:not([disabled]), textarea:not([disabled]), select:not([disabled])")].filter(el => el.offsetParent !== null);
+      if (!focusable.length) return;
+      const first = focusable[0], last = focusable[focusable.length - 1];
+      if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
+      else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
+    }
+    if (event.key === "Enter" && event.target.classList.contains("task-card")) {
+      event.preventDefault(); event.target.click();
+    }
   });
 })();
