@@ -1,11 +1,14 @@
 const $ = (id) => document.getElementById(id);
-const state = { tasks: [], view: "all", project: null, editingId: null };
+const state = { tasks: [], view: "all", project: null, editingId: null, calendarDate: new Date() };
 const statusNext = { todo: "progress", progress: "done", done: "todo" };
 const today = () => new Date().toISOString().slice(0, 10);
 const plusDays = (n) => { const d = new Date(); d.setDate(d.getDate() + n); return d.toISOString().slice(0, 10); };
 
 async function api(url, options = {}) {
-  const res = await fetch(url, { headers: { "Content-Type": "application/json", ...(options.headers || {}) }, ...options });
+  const method = (options.method || "GET").toUpperCase();
+  const headers = { ...(options.headers || {}) };
+  if (method !== "GET" && method !== "HEAD") headers["Content-Type"] = "application/json";
+  const res = await fetch(url, { ...options, headers });
   if (res.status === 401) { window.location.href = "/login"; throw new Error("Authentication required"); }
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data.error || "Request failed");
@@ -16,16 +19,19 @@ function toast(message, type = "normal") {
   const el = $("toast");
   el.textContent = message;
   el.dataset.type = type;
+  el.setAttribute("role", "status");
   el.classList.remove("hidden");
   clearTimeout(window.toastTimer);
-  window.toastTimer = setTimeout(() => el.classList.add("hidden"), 2400);
+  window.toastTimer = setTimeout(() => el.classList.add("hidden"), 2600);
 }
 function formatDue(value) {
   if (!value) return "No due date";
   if (value === today()) return "Due today";
   if (value === plusDays(1)) return "Due tomorrow";
-  return `Due ${new Date(`${value}T00:00:00`).toLocaleDateString(undefined,{month:"short",day:"numeric"})}`;
+  const d = new Date(`${value}T00:00:00`);
+  return `Due ${d.toLocaleDateString(undefined, { month: "short", day: "numeric" })}`;
 }
+function isOverdue(task) { return task.status !== "done" && task.due && task.due < today(); }
 function filteredTasks() {
   const q = $("searchInput").value.trim().toLowerCase();
   const priority = $("filterSelect").value;
@@ -33,109 +39,178 @@ function filteredTasks() {
     if (state.project && t.project !== state.project) return false;
     if (priority !== "all" && t.priority !== priority) return false;
     if (state.view === "active" && t.status === "done") return false;
-    if (q && !`${t.title} ${t.description} ${t.project} ${t.priority}`.toLowerCase().includes(q)) return false;
+    if (q && !`${t.title} ${t.description} ${t.project} ${t.priority} ${t.status}`.toLowerCase().includes(q)) return false;
     return true;
   });
 }
 function render() {
   const visible = filteredTasks();
-  ["todo","progress","done"].forEach(s => $(s+"List").innerHTML = "");
-  const groups = {todo:[],progress:[],done:[]};
+  ["todo", "progress", "done"].forEach(s => $(s + "List").innerHTML = "");
+  const groups = { todo: [], progress: [], done: [] };
   if (state.view !== "calendar" && state.view !== "analytics") visible.forEach(t => groups[t.status].push(t));
-  Object.entries(groups).forEach(([s,items]) => items.forEach(t => renderTask(t,$(s+"List"))));
-  $("todoCount").textContent=groups.todo.length; $("progressCount").textContent=groups.progress.length; $("doneCount").textContent=groups.done.length;
-  $("emptyState").classList.toggle("hidden", visible.length > 0 || state.view === "calendar" || state.view === "analytics");
-  const done=state.tasks.filter(t=>t.status==="done").length, progress=state.tasks.filter(t=>t.status==="progress").length, overdue=state.tasks.filter(t=>t.status!=="done"&&t.due&&t.due<today()).length;
-  $("statTotal").textContent=state.tasks.length; $("statDone").textContent=done; $("statProgress").textContent=progress; $("statOverdue").textContent=overdue;
-  $("productivity").textContent=state.tasks.length?`${Math.round(done/state.tasks.length*100)}%`:"0%";
-  $("productivityTrend").textContent=`${done} completed`;
-  $("activeCount").textContent=state.view==="calendar"?"Tasks scheduled this month":state.view==="analytics"?"Performance overview":`${state.tasks.filter(t=>t.status!=="done").length} active tasks`;
+  Object.entries(groups).forEach(([s, items]) => items.forEach(t => renderTask(t, $(s + "List"))));
+  $("todoCount").textContent = groups.todo.length;
+  $("progressCount").textContent = groups.progress.length;
+  $("doneCount").textContent = groups.done.length;
+  const showBoardEmpty = state.view !== "calendar" && state.view !== "analytics" && visible.length === 0;
+  $("emptyState").classList.toggle("hidden", !showBoardEmpty);
+  if (showBoardEmpty) {
+    $("emptyState").innerHTML = `<strong>No tasks found</strong><span>Try another search or clear your filters.</span><button type="button" class="control-btn add-task-btn" id="emptyAddTask">+ Create task</button>`;
+    $("emptyAddTask").addEventListener("click", () => openModal());
+  }
+  const done = state.tasks.filter(t => t.status === "done").length;
+  const progress = state.tasks.filter(t => t.status === "progress").length;
+  const overdue = state.tasks.filter(t => isOverdue(t)).length;
+  $("statTotal").textContent = state.tasks.length;
+  $("statDone").textContent = done;
+  $("statProgress").textContent = progress;
+  $("statOverdue").textContent = overdue;
+  $("productivity").textContent = state.tasks.length ? `${Math.round(done / state.tasks.length * 100)}%` : "0%";
+  $("productivityTrend").textContent = `${done} completed`;
+  $("activeCount").textContent = state.view === "calendar" ? "Tasks scheduled this month" : state.view === "analytics" ? "Performance overview" : `${state.tasks.filter(t => t.status !== "done").length} active tasks`;
+  document.querySelectorAll(".project-item").forEach(el => el.classList.toggle("selected", el.dataset.project === state.project));
   renderSpecialView();
 }
-function renderTask(task,list) {
-  const node=$("taskTemplate").content.firstElementChild.cloneNode(true), accent=node.querySelector(".task-accent"), bar=node.querySelector(".task-progress-bar");
-  node.dataset.id=task.id;
-  node.querySelector(".task-title").textContent=task.title;
-  node.querySelector(".task-tagline").textContent=task.project;
-  node.querySelector(".task-due").textContent=formatDue(task.due);
-  node.querySelector(".task-priority").textContent=task.priority;
-  bar.style.width=`${task.status==="done"?100:Math.max(8,task.progress||0)}%`;
-  const tone={todo:"var(--purple)",progress:"var(--blue)",done:"var(--green)"}[task.status];
-  accent.style.background=tone; bar.style.background=tone;
-  node.querySelector(".more-btn").addEventListener("click",e=>{e.stopPropagation();document.querySelectorAll(".task-menu").forEach(m=>m.classList.add("hidden"));node.querySelector(".task-menu").classList.toggle("hidden")});
-  node.querySelector(".edit-btn").addEventListener("click",()=>openModal(task.id));
-  node.querySelector(".delete-btn").addEventListener("click",()=>removeTask(task.id));
-  node.querySelector(".next-btn").addEventListener("click",()=>moveTask(task.id,statusNext[task.status]));
-  node.addEventListener("dragstart",()=>{node.classList.add("dragging");window.dragId=task.id});
-  node.addEventListener("dragend",()=>{node.classList.remove("dragging");window.dragId=null});
+function renderTask(task, list) {
+  const node = $("taskTemplate").content.firstElementChild.cloneNode(true);
+  const accent = node.querySelector(".task-accent");
+  const bar = node.querySelector(".task-progress-bar");
+  node.dataset.id = task.id;
+  node.setAttribute("aria-label", `${task.title}, ${task.priority} priority, ${task.status}`);
+  node.querySelector(".task-title").textContent = task.title;
+  node.querySelector(".task-tagline").textContent = task.project;
+  node.querySelector(".task-due").textContent = formatDue(task.due);
+  node.querySelector(".task-priority").textContent = task.priority;
+  node.querySelector(".task-due").classList.toggle("overdue", Boolean(isOverdue(task)));
+  node.classList.toggle("completed", task.status === "done");
+  bar.style.width = `${task.status === "done" ? 100 : Math.max(8, task.progress || 0)}%`;
+  const tone = { todo: "var(--purple)", progress: "var(--blue)", done: "var(--green)" }[task.status];
+  accent.style.background = tone;
+  bar.style.background = tone;
+  const more = node.querySelector(".more-btn");
+  more.setAttribute("aria-label", `Actions for ${task.title}`);
+  more.addEventListener("click", e => {
+    e.stopPropagation();
+    document.querySelectorAll(".task-menu").forEach(m => m.classList.add("hidden"));
+    node.querySelector(".task-menu").classList.toggle("hidden");
+  });
+  node.querySelector(".edit-btn").addEventListener("click", e => { e.stopPropagation(); openModal(task.id); });
+  node.querySelector(".delete-btn").addEventListener("click", e => { e.stopPropagation(); removeTask(task.id); });
+  node.querySelector(".next-btn").addEventListener("click", e => { e.stopPropagation(); moveTask(task.id, statusNext[task.status]); });
+  node.addEventListener("click", e => { if (!e.target.closest("button")) openModal(task.id); });
+  node.addEventListener("dragstart", () => { node.classList.add("dragging"); window.dragId = task.id; });
+  node.addEventListener("dragend", () => { node.classList.remove("dragging"); window.dragId = null; });
   list.appendChild(node);
 }
-function renderSpecialView(){
-  const cal=$("calendarView"), analytics=$("analyticsView"), board=$("board");
-  cal.classList.toggle("hidden",state.view!=="calendar");
-  analytics.classList.toggle("hidden",state.view!=="analytics");
-  board.classList.toggle("hidden",state.view==="calendar"||state.view==="analytics");
-  if(state.view==="calendar") renderCalendar(cal);
-  if(state.view==="analytics") renderAnalytics(analytics);
+function renderSpecialView() {
+  const cal = $("calendarView"), analytics = $("analyticsView"), board = $("board");
+  cal.classList.toggle("hidden", state.view !== "calendar");
+  analytics.classList.toggle("hidden", state.view !== "analytics");
+  board.classList.toggle("hidden", state.view === "calendar" || state.view === "analytics");
+  if (state.view === "calendar") renderCalendar(cal);
+  if (state.view === "analytics") renderAnalytics(analytics);
 }
-function renderCalendar(el){
-  const now=new Date(), year=now.getFullYear(), month=now.getMonth(), first=new Date(year,month,1), days=new Date(year,month+1,0).getDate(), start=first.getDay();
-  let html=`<div class="calendar-toolbar"><div><h3>${now.toLocaleDateString(undefined,{month:"long",year:"numeric"})}</h3><p>Plan your deadlines and keep the month moving.</p></div></div><div class="calendar-grid">${["Sun","Mon","Tue","Wed","Thu","Fri","Sat"].map(x=>`<div class="calendar-head">${x}</div>`).join("")}`;
-  for(let i=0;i<start;i++) html+="<div class=\"calendar-blank\"></div>";
-  for(let d=1;d<=days;d++){const key=`${year}-${String(month+1).padStart(2,"0")}-${String(d).padStart(2,"0")}`, items=state.tasks.filter(t=>t.due===key);html+=`<div class="calendar-day ${key===today()?"today":""}"><strong>${d}</strong>${items.map(t=>`<span class="calendar-task ${t.status}">${escapeHtml(t.title)}</span>`).join("")}</div>`}
-  el.innerHTML=html+"</div>";
+function renderCalendar(el) {
+  const cursor = new Date(state.calendarDate.getFullYear(), state.calendarDate.getMonth(), 1);
+  const year = cursor.getFullYear(), month = cursor.getMonth();
+  const first = new Date(year, month, 1), days = new Date(year, month + 1, 0).getDate(), start = first.getDay();
+  let html = `<div class="calendar-toolbar"><button class="control-btn calendar-nav" data-calendar="prev" aria-label="Previous month">←</button><div><h3>${cursor.toLocaleDateString(undefined, { month: "long", year: "numeric" })}</h3><p>Plan your deadlines and keep the month moving.</p></div><button class="control-btn calendar-nav" data-calendar="next" aria-label="Next month">→</button></div><div class="calendar-grid">${["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map(x => `<div class="calendar-head">${x}</div>`).join("")}`;
+  for (let i = 0; i < start; i++) html += `<div class="calendar-blank"></div>`;
+  for (let d = 1; d <= days; d++) {
+    const key = `${year}-${String(month + 1).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+    const items = state.tasks.filter(t => t.due === key);
+    html += `<div class="calendar-day ${key === today() ? "today" : ""}"><strong>${d}</strong>${items.map(t => `<button class="calendar-task ${t.status}" data-task-id="${t.id}" title="${escapeHtml(t.title)}">${escapeHtml(t.title)}</button>`).join("")}</div>`;
+  }
+  el.innerHTML = html + "</div>";
+  el.querySelector("[data-calendar='prev']").addEventListener("click", () => { state.calendarDate.setMonth(state.calendarDate.getMonth() - 1); renderCalendar(el); });
+  el.querySelector("[data-calendar='next']").addEventListener("click", () => { state.calendarDate.setMonth(state.calendarDate.getMonth() + 1); renderCalendar(el); });
+  el.querySelectorAll("[data-task-id]").forEach(btn => btn.addEventListener("click", () => openModal(Number(btn.dataset.taskId))));
 }
-function renderAnalytics(el){
-  const total=state.tasks.length, done=state.tasks.filter(t=>t.status==="done").length, high=state.tasks.filter(t=>t.priority==="high"&&t.status!=="done").length, completion=total?Math.round(done/total*100):0, overdue=state.tasks.filter(t=>t.status!=="done"&&t.due&&t.due<today()).length;
-  el.innerHTML=`<div class="analytics-heading"><div><h3>Performance overview</h3><p>A quick snapshot of your current workload.</p></div></div><div class="analytics-cards"><div class="analytics-card"><span>Completion rate</span><strong>${completion}%</strong><div class="progress-wide"><span style="width:${completion}%"></span></div></div><div class="analytics-card"><span>Open work</span><strong>${total-done}</strong><small>tasks remaining</small></div><div class="analytics-card"><span>High priority</span><strong>${high}</strong><small>need attention</small></div><div class="analytics-card"><span>Overdue</span><strong>${overdue}</strong><small>past due date</small></div></div>`;
+function renderAnalytics(el) {
+  const total = state.tasks.length;
+  const done = state.tasks.filter(t => t.status === "done").length;
+  const high = state.tasks.filter(t => t.priority === "high" && t.status !== "done").length;
+  const overdue = state.tasks.filter(t => isOverdue(t)).length;
+  const completion = total ? Math.round(done / total * 100) : 0;
+  const projects = [...new Set(state.tasks.map(t => t.project))].map(project => ({ project, count: state.tasks.filter(t => t.project === project).length }));
+  const maxProject = Math.max(1, ...projects.map(x => x.count));
+  el.innerHTML = `<div class="analytics-heading"><div><h3>Performance overview</h3><p>A quick snapshot of your current workload.</p></div></div><div class="analytics-cards"><div class="analytics-card"><span>Completion rate</span><strong>${completion}%</strong><div class="progress-wide"><span style="width:${completion}%"></span></div></div><div class="analytics-card"><span>Open work</span><strong>${total - done}</strong><small>tasks remaining</small></div><div class="analytics-card"><span>High priority</span><strong>${high}</strong><small>need attention</small></div><div class="analytics-card"><span>Overdue</span><strong>${overdue}</strong><small>past due date</small></div></div><div class="analytics-panel"><div><h3>Tasks by project</h3><p>Where your current workload is concentrated.</p></div>${projects.length ? projects.map(x => `<div class="project-metric"><div><span>${escapeHtml(x.project)}</span><strong>${x.count}</strong></div><div class="progress-wide"><span style="width:${Math.round(x.count / maxProject * 100)}%"></span></div></div>`).join("") : `<div class="analytics-empty">Create a task to start seeing project insights.</div>`}</div>`;
 }
-function escapeHtml(s){return String(s).replace(/[&<>'"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]));}
-async function loadTasks(){
-  try{ state.tasks=(await api("/api/tasks")).tasks; render(); }
-  catch(e){ toast(e.message,"error"); }
+function escapeHtml(s) { return String(s).replace(/[&<>'"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;" }[c])); }
+async function loadTasks() {
+  try {
+    state.tasks = (await api("/api/tasks")).tasks;
+    render();
+  } catch (e) { toast(e.message, "error"); }
 }
-function openModal(id=null){
-  state.editingId=id;
-  const t=state.tasks.find(x=>x.id===id);
-  $("modalTitle").textContent=t?"Edit task":"Create task";
-  $("taskId").value=id||""; $("taskTitle").value=t?.title||""; $("taskDescription").value=t?.description||"";
-  $("taskDue").value=t?.due||today(); $("taskPriority").value=t?.priority||"medium"; $("taskProject").value=t?.project||"Website Redesign"; $("taskStatus").value=t?.status||"todo";
-  $("modal").classList.remove("hidden"); document.body.classList.add("modal-open"); setTimeout(()=>$("taskTitle").focus(),30);
+function openModal(id = null) {
+  state.editingId = id;
+  const t = state.tasks.find(x => x.id === id);
+  $("modalTitle").textContent = t ? "Edit task" : "Create task";
+  $("taskId").value = id || "";
+  $("taskTitle").value = t?.title || "";
+  $("taskDescription").value = t?.description || "";
+  $("taskDue").value = t?.due || today();
+  $("taskPriority").value = t?.priority || "medium";
+  $("taskProject").value = t?.project || "Website Redesign";
+  $("taskStatus").value = t?.status || "todo";
+  $("modal").classList.remove("hidden");
+  document.body.classList.add("modal-open");
+  setTimeout(() => $("taskTitle").focus(), 30);
 }
-function closeModal(){ $("modal").classList.add("hidden"); document.body.classList.remove("modal-open"); state.editingId=null; $("taskForm").reset(); }
-async function saveTask(e){
+function closeModal() { $("modal").classList.add("hidden"); document.body.classList.remove("modal-open"); state.editingId = null; $("taskForm").reset(); }
+async function saveTask(e) {
   e.preventDefault();
-  const editing=Boolean(state.editingId);
-  const data={title:$("taskTitle").value.trim(),description:$("taskDescription").value.trim(),due:$("taskDue").value,priority:$("taskPriority").value,project:$("taskProject").value,status:$("taskStatus").value};
-  if(!data.title)return;
-  try{ if(editing) await api(`/api/tasks/${state.editingId}`,{method:"PUT",body:JSON.stringify(data)}); else await api("/api/tasks",{method:"POST",body:JSON.stringify(data)}); closeModal(); await loadTasks(); toast(editing?"Task updated":"Task created"); }
-  catch(e){ toast(e.message,"error"); }
+  const editing = Boolean(state.editingId);
+  const data = { title: $("taskTitle").value.trim(), description: $("taskDescription").value.trim(), due: $("taskDue").value, priority: $("taskPriority").value, project: $("taskProject").value, status: $("taskStatus").value };
+  if (!data.title) { toast("Add a task title first", "error"); return; }
+  try {
+    if (editing) await api(`/api/tasks/${state.editingId}`, { method: "PUT", body: JSON.stringify(data) });
+    else await api("/api/tasks", { method: "POST", body: JSON.stringify(data) });
+    closeModal(); await loadTasks(); toast(editing ? "Task updated" : "Task created");
+  } catch (e) { toast(e.message, "error"); }
 }
-async function removeTask(id){
-  if(!confirm("Delete this task?"))return;
-  try{await api(`/api/tasks/${id}`,{method:"DELETE"});await loadTasks();toast("Task deleted");}catch(e){toast(e.message,"error")}
+async function removeTask(id) {
+  if (!confirm("Delete this task?")) return;
+  try { await api(`/api/tasks/${id}`, { method: "DELETE" }); await loadTasks(); toast("Task deleted"); }
+  catch (e) { toast(e.message, "error"); }
 }
-async function moveTask(id,status){
-  try{await api(`/api/tasks/${id}/status`,{method:"PATCH",body:JSON.stringify({status})});await loadTasks();toast(status==="done"?"Task completed":`Task moved to ${status==="progress"?"In progress":"To do"}`);}catch(e){toast(e.message,"error")}
+async function moveTask(id, status) {
+  try {
+    await api(`/api/tasks/${id}/status`, { method: "PATCH", body: JSON.stringify({ status }) });
+    await loadTasks();
+    toast(status === "done" ? "Task completed" : `Task moved to ${status === "progress" ? "In progress" : "To do"}`);
+  } catch (e) { toast(e.message, "error"); }
 }
-function setView(view){
-  state.view=view; state.project=null;
-  document.querySelectorAll(".nav-item").forEach(n=>n.classList.toggle("active",n.dataset.view===view));
-  $("viewTitle").textContent={all:"My tasks",active:"My tasks",board:"Board",calendar:"Calendar",analytics:"Analytics"}[view]||"My tasks";
+function setView(view) {
+  state.view = view; state.project = null;
+  document.querySelectorAll(".nav-item").forEach(n => n.classList.toggle("active", n.dataset.view === view));
+  $("viewTitle").textContent = { all: "My tasks", active: "My tasks", board: "Board", calendar: "Calendar", analytics: "Analytics" }[view] || "My tasks";
   render();
 }
 
-document.querySelectorAll(".nav-item").forEach(el=>el.addEventListener("click",()=>setView(el.dataset.view)));
-document.querySelectorAll(".project-item").forEach(el=>el.addEventListener("click",()=>{state.project=el.dataset.project;state.view="all";document.querySelectorAll(".nav-item").forEach(n=>n.classList.toggle("active",n.dataset.view==="all"));$("viewTitle").textContent=state.project;render()}));
-$("allTasksBtn").addEventListener("click",()=>{state.project=null;setView("all")});
-$("searchInput").addEventListener("input",render); $("filterSelect").addEventListener("change",render);
-$("newTaskBtn").addEventListener("click",()=>openModal()); $("newTaskTop").addEventListener("click",()=>openModal()); $("closeModal").addEventListener("click",closeModal); $("cancelBtn").addEventListener("click",closeModal);
-$("modal").addEventListener("click",e=>{if(e.target===$("modal"))closeModal()}); $("taskForm").addEventListener("submit",saveTask);
-["todo","progress","done"].forEach(status=>$(status+"List").addEventListener("dragover",e=>e.preventDefault()));
-document.querySelectorAll(".board-column").forEach(col=>col.addEventListener("drop",()=>{if(window.dragId)moveTask(window.dragId,col.dataset.status)}));
-$("themeBtn").addEventListener("click",()=>{document.body.classList.toggle("dark");localStorage.setItem("taskflow.theme",document.body.classList.contains("dark")?"dark":"light");});
-if(localStorage.getItem("taskflow.theme")==="dark")document.body.classList.add("dark");
-document.addEventListener("click",()=>document.querySelectorAll(".task-menu").forEach(m=>m.classList.add("hidden")));
-document.addEventListener("keydown",e=>{if(e.key==="Escape"&&!$("modal").classList.contains("hidden"))closeModal();if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==="k"){e.preventDefault();$("searchInput").focus()}if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==="n"){e.preventDefault();openModal()}});
-const hour=new Date().getHours(), name=$("greeting").textContent.split(", ").slice(1).join(", "); $("greeting").textContent=`${hour<12?"Good morning":hour<18?"Good afternoon":"Good evening"}, ${name}`;
+document.querySelectorAll(".nav-item").forEach(el => el.addEventListener("click", () => setView(el.dataset.view)));
+document.querySelectorAll(".project-item").forEach(el => el.addEventListener("click", () => { state.project = el.dataset.project; state.view = "all"; document.querySelectorAll(".nav-item").forEach(n => n.classList.toggle("active", n.dataset.view === "all")); $("viewTitle").textContent = state.project; render(); }));
+$("allTasksBtn").addEventListener("click", () => { state.project = null; setView("all"); });
+$("searchInput").addEventListener("input", render);
+$("filterSelect").addEventListener("change", render);
+$("newTaskBtn").addEventListener("click", () => openModal());
+$("newTaskTop").addEventListener("click", () => openModal());
+$("closeModal").addEventListener("click", closeModal);
+$("cancelBtn").addEventListener("click", closeModal);
+$("modal").addEventListener("click", e => { if (e.target === $("modal")) closeModal(); });
+$("taskForm").addEventListener("submit", saveTask);
+["todo", "progress", "done"].forEach(status => $(status + "List").addEventListener("dragover", e => { e.preventDefault(); $(status + "List").classList.add("drop-target"); }));
+["todo", "progress", "done"].forEach(status => $(status + "List").addEventListener("dragleave", () => $(status + "List").classList.remove("drop-target")));
+document.querySelectorAll(".board-column").forEach(col => col.addEventListener("drop", () => { if (window.dragId) moveTask(window.dragId, col.dataset.status); document.querySelectorAll(".column-list").forEach(x => x.classList.remove("drop-target")); }));
+$("themeBtn").addEventListener("click", () => { document.body.classList.toggle("dark"); localStorage.setItem("taskflow.theme", document.body.classList.contains("dark") ? "dark" : "light"); });
+if (localStorage.getItem("taskflow.theme") === "dark") document.body.classList.add("dark");
+document.addEventListener("click", () => document.querySelectorAll(".task-menu").forEach(m => m.classList.add("hidden")));
+document.addEventListener("keydown", e => {
+  if (e.key === "Escape" && !$("modal").classList.contains("hidden")) closeModal();
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") { e.preventDefault(); $("searchInput").focus(); }
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "n") { e.preventDefault(); openModal(); }
+});
+const hour = new Date().getHours(), name = $("greeting").textContent.split(", ").slice(1).join(", ");
+$("greeting").textContent = `${hour < 12 ? "Good morning" : hour < 18 ? "Good afternoon" : "Good evening"}, ${name}`;
 loadTasks();
