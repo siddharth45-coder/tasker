@@ -3,102 +3,115 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <meta name="description" content="Tasker - a focused task management workspace" />
-  <title>Tasker</title>
+  <meta name="description" content="TaskFlow dynamic task manager" />
+  <title>TaskFlow — Task Manager</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
   <div class="app-shell">
-    <header class="topbar">
-      <a class="brand" href="#">Tasker</a>
-      <div class="topbar-actions">
-        <button id="focusBtn" class="ghost-btn" type="button">Focus</button>
-        <button id="themeBtn" class="icon-btn" type="button" aria-label="Toggle theme">☾</button>
-        <button id="newTaskTop" class="primary-btn" type="button">+ New task</button>
+    <aside class="sidebar" data-node-id="2:3">
+      <div class="brand">TaskFlow</div>
+      <div class="workspace-label">WORKSPACE</div>
+      <nav class="workspace-nav" aria-label="Workspace">
+        <button class="nav-item active" data-view="all" type="button"><span class="nav-icon">⌂</span><span>Overview</span></button>
+        <button class="nav-item" data-view="active" type="button"><span class="nav-icon">✓</span><span>My Tasks</span></button>
+        <button class="nav-item" data-view="board" type="button"><span class="nav-icon">▦</span><span>Board</span></button>
+        <button class="nav-item" data-view="calendar" type="button"><span class="nav-icon">◷</span><span>Calendar</span></button>
+        <button class="nav-item" data-view="analytics" type="button"><span class="nav-icon">◉</span><span>Analytics</span></button>
+      </nav>
+
+      <div class="projects-label">PROJECTS</div>
+      <div class="projects">
+        <button class="project-item" data-tag="Design" type="button"><span class="project-dot purple"></span>Website Redesign</button>
+        <button class="project-item" data-tag="Development" type="button"><span class="project-dot cyan"></span>Mobile App</button>
+        <button class="project-item" data-tag="Marketing" type="button"><span class="project-dot amber"></span>Marketing</button>
       </div>
-    </header>
 
-    <div class="workspace">
-      <aside class="sidebar">
-        <div class="sidebar-section">
-          <button class="nav-item active" data-view="all"><span>Inbox</span><span id="allCount">0</span></button>
-          <button class="nav-item" data-view="today"><span>Today</span><span id="todayCount">0</span></button>
-          <button class="nav-item" data-view="upcoming"><span>Upcoming</span><span id="upcomingCount">0</span></button>
-          <button class="nav-item" data-view="completed"><span>Completed</span><span id="completedCount">0</span></button>
-        </div>
-        <div class="sidebar-section">
-          <div class="section-label">Priority</div>
-          <button class="nav-item" data-priority="high"><span>High</span><span class="dot high"></span></button>
-          <button class="nav-item" data-priority="medium"><span>Medium</span><span class="dot medium"></span></button>
-          <button class="nav-item" data-priority="low"><span>Low</span><span class="dot low"></span></button>
-        </div>
-        <div class="sidebar-footer">
-          <div class="progress-label"><span>Weekly progress</span><strong id="progressText">0%</strong></div>
-          <div class="progress"><span id="progressBar"></span></div>
-        </div>
-      </aside>
+      <div class="productivity-card">
+        <span>Your productivity</span>
+        <div><strong id="productivity">72%</strong><small>↑ 14% this week</small></div>
+      </div>
+    </aside>
 
-      <main class="main-content">
-        <section class="hero">
-          <div>
-            <p id="dateLabel" class="eyebrow"></p>
-            <h1 id="viewTitle">All tasks</h1>
-            <p id="viewSubtitle">Everything you need to get done in one place.</p>
-          </div>
-          <div class="hero-actions">
-            <label class="search-box">
-              <span>⌕</span>
-              <input id="searchInput" type="search" placeholder="Search tasks..." autocomplete="off" />
-            </label>
-            <select id="sortSelect" class="select" aria-label="Sort tasks">
-              <option value="created">Newest</option>
-              <option value="due">Due date</option>
-              <option value="priority">Priority</option>
-              <option value="title">Title</option>
+    <main class="main-content" data-node-id="2:28">
+      <header class="top-header">
+        <div>
+          <h1 id="greeting">Good morning, Siddharth</h1>
+          <p>Here is what is happening with your tasks today.</p>
+        </div>
+        <div class="header-actions">
+          <label class="search-box"><span>⌕</span><input id="searchInput" type="search" placeholder="Search tasks..." aria-label="Search tasks" /></label>
+          <button id="themeBtn" class="header-icon" type="button" aria-label="Toggle theme">◌</button>
+          <button id="newTaskTop" class="add-icon" type="button" aria-label="Add task">+</button>
+        </div>
+      </header>
+
+      <section class="stats-grid" aria-label="Task statistics">
+        <article class="stat-card"><span>Total tasks</span><strong id="statTotal">24</strong><em class="purple-text">↑ 12%</em></article>
+        <article class="stat-card"><span>Completed</span><strong id="statDone">16</strong><em class="green-text">↑ 8%</em></article>
+        <article class="stat-card"><span>In progress</span><strong id="statProgress">5</strong><em class="blue-text">→ 2 today</em></article>
+        <article class="stat-card"><span>Overdue</span><strong id="statOverdue">3</strong><em class="red-text">↓ 1 from yesterday</em></article>
+      </section>
+
+      <section class="tasks-section">
+        <div class="section-header">
+          <div><h2 id="viewTitle">My tasks</h2><p id="activeCount">12 active tasks</p></div>
+          <div class="task-controls">
+            <button id="allTasksBtn" class="control-btn active-control" type="button">All tasks</button>
+            <select id="filterSelect" class="control-btn" aria-label="Filter tasks">
+              <option value="all">Filter  ≡</option><option value="high">High priority</option><option value="medium">Medium priority</option><option value="low">Low priority</option>
             </select>
+            <button id="newTaskBtn" class="control-btn add-task-btn" type="button">+ Add task</button>
           </div>
-        </section>
+        </div>
 
-        <section class="stats-grid" aria-label="Task overview">
-          <article class="stat-card"><span>Total</span><strong id="statTotal">0</strong></article>
-          <article class="stat-card"><span>Open</span><strong id="statOpen">0</strong></article>
-          <article class="stat-card"><span>Done</span><strong id="statDone">0</strong></article>
-          <article class="stat-card"><span>High priority</span><strong id="statHigh">0</strong></article>
-        </section>
-
-        <section id="taskList" class="task-list" aria-live="polite"></section>
-      </main>
-    </div>
+        <div id="board" class="board">
+          <section class="board-column todo-column" data-status="todo">
+            <div class="column-heading"><span>To do</span><span id="todoCount">3</span></div>
+            <div id="todoList" class="column-list"></div>
+          </section>
+          <section class="board-column progress-column" data-status="progress">
+            <div class="column-heading"><span>In progress</span><span id="progressCount">4</span></div>
+            <div id="progressList" class="column-list"></div>
+          </section>
+          <section class="board-column done-column" data-status="done">
+            <div class="column-heading"><span>Done</span><span id="doneCount">5</span></div>
+            <div id="doneList" class="column-list"></div>
+          </section>
+        </div>
+        <div id="emptyState" class="empty-state hidden">No tasks match your current filters.</div>
+      </section>
+    </main>
   </div>
 
   <div id="modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
     <div class="modal-card">
-      <div class="modal-header">
-        <div><p class="eyebrow">Task editor</p><h2 id="modalTitle">Create task</h2></div>
-        <button id="closeModal" class="icon-btn" type="button" aria-label="Close">×</button>
-      </div>
+      <div class="modal-header"><div><p>Task editor</p><h2 id="modalTitle">Create task</h2></div><button id="closeModal" class="close-btn" type="button" aria-label="Close">×</button></div>
       <form id="taskForm">
         <input type="hidden" id="taskId" />
-        <label>Title<input id="taskTitle" name="title" required maxlength="120" placeholder="e.g. Finish semester project" /></label>
-        <label>Description<textarea id="taskDescription" name="description" maxlength="500" rows="4" placeholder="Add a little context..."></textarea></label>
-        <div class="form-grid">
-          <label>Due date<input id="taskDue" name="due" type="date" /></label>
-          <label>Priority<select id="taskPriority" name="priority"><option value="low">Low</option><option value="medium" selected>Medium</option><option value="high">High</option></select></label>
-        </div>
-        <label>Tag<input id="taskTag" name="tag" maxlength="30" placeholder="e.g. College" /></label>
-        <div class="form-actions"><button id="cancelBtn" class="ghost-btn" type="button">Cancel</button><button class="primary-btn" type="submit">Save task</button></div>
+        <label>Title<input id="taskTitle" required maxlength="120" placeholder="e.g. Finalize homepage wireframe" /></label>
+        <label>Description<textarea id="taskDescription" maxlength="500" rows="3" placeholder="Add a little context..."></textarea></label>
+        <div class="form-grid"><label>Due date<input id="taskDue" type="date" /></label><label>Priority<select id="taskPriority"><option value="low">Low</option><option value="medium" selected>Medium</option><option value="high">High</option></select></label></div>
+        <label>Project / tag<select id="taskTag"><option value="Design">Design</option><option value="Development">Development</option><option value="Marketing">Marketing</option><option value="Personal">Personal</option></select></label>
+        <label>Status<select id="taskStatus"><option value="todo">To do</option><option value="progress">In progress</option><option value="done">Done</option></select></label>
+        <div class="form-actions"><button id="cancelBtn" class="cancel-btn" type="button">Cancel</button><button class="save-btn" type="submit">Save task</button></div>
       </form>
     </div>
   </div>
 
   <template id="taskTemplate">
     <article class="task-card">
-      <button class="check-btn" type="button" aria-label="Mark task complete"></button>
-      <div class="task-body"><div class="task-topline"><h3 class="task-title"></h3><span class="priority-badge"></span></div><p class="task-description"></p><div class="task-meta"><span class="task-due"></span><span class="task-tag"></span></div></div>
-      <div class="task-actions"><button class="icon-btn edit-btn" type="button" aria-label="Edit task">✎</button><button class="icon-btn delete-btn" type="button" aria-label="Delete task">⌫</button></div>
+      <div class="task-accent"></div>
+      <div class="task-card-content">
+        <div class="task-title-row"><h3 class="task-title"></h3><button class="more-btn" type="button" aria-label="Task actions">•••</button></div>
+        <p class="task-tagline"></p>
+        <div class="task-progress-track"><span class="task-progress-bar"></span></div>
+        <div class="task-footer"><span class="task-due"></span><span class="task-percent"></span></div>
+      </div>
+      <div class="task-menu hidden"><button class="edit-btn" type="button">Edit</button><button class="complete-btn" type="button">Move / complete</button><button class="delete-btn" type="button">Delete</button></div>
     </article>
   </template>
 
