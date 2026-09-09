@@ -1,22 +1,26 @@
 # TaskFlow
 
-A production-style task management web app based on the TaskFlow Figma design. The project now uses Flask, SQLite and a vanilla HTML/CSS/JavaScript frontend.
+A polished, production-style task management web app based on the TaskFlow Figma design. It uses Flask, SQLite and a lightweight vanilla HTML/CSS/JavaScript frontend.
 
 ## Features
 
 - Figma-inspired responsive dashboard
 - User registration, login and logout
-- Secure password hashing with Flask/Werkzeug
-- SQLite persistence per user
+- Secure password hashing
+- SQLite persistence isolated per user
 - Create, edit, delete and move tasks
 - Drag-and-drop Kanban board
 - Projects and priority filters
 - Live search
 - Calendar view
-- Analytics view and productivity stats
+- Analytics and productivity stats
 - Persistent light/dark theme
+- Smooth micro-interactions and page/card/modal animations
+- Reduced-motion support
+- Keyboard shortcuts: `Ctrl/Cmd + K` search, `Ctrl/Cmd + N` new task, `Esc` close modal
 - JSON REST API
 - Health endpoint for deployment checks
+- Security headers, secure session cookie options and request-size limits
 - Mobile-friendly responsive layout
 
 ## Run locally
@@ -34,36 +38,45 @@ pip install -r requirements.txt
 python app.py
 ```
 
-Open `http://localhost:5000`.
+Open `http://localhost:5000` and create an account. Demo tasks are automatically seeded for each new account.
 
-On first run, create an account. Demo tasks are automatically seeded for the new account.
+## Environment
 
-## Environment variables
+Copy `.env.example` to `.env` and set a long random `SECRET_KEY`.
 
 ```text
 SECRET_KEY=replace-with-a-long-random-secret
 PORT=5000
 FLASK_DEBUG=0
+COOKIE_SECURE=1
 ```
+
+Use `COOKIE_SECURE=1` when the application is served over HTTPS.
 
 ## Project structure
 
 ```text
-app.py                    # Flask app, auth, API and SQLite setup
-requirements.txt          # Python dependencies
+app.py
+requirements.txt
+Procfile
+.env.example
 .gitignore
 
 templates/
-  index.html              # Main TaskFlow dashboard
-  login.html              # Sign-in page
-  register.html           # Registration page
+  index.html
+  login.html
+  register.html
 
 static/
-  styles.css              # Figma-inspired responsive styling
-  app.js                  # API-connected frontend interactions
+  styles.css
+  app.js
+
+deploy/
+  nginx.conf
+  tasker.service
 
 database/
-  tasker.db               # Created automatically at runtime; ignored by Git
+  tasker.db       # generated at runtime; ignored by Git
 ```
 
 ## API
@@ -76,6 +89,26 @@ database/
 - `PATCH /api/tasks/<id>/status`
 - `GET /health`
 
-## Deployment direction
+All task endpoints require an authenticated session and scope records to the logged-in user.
 
-For the VPS production setup, run Flask behind Gunicorn and Nginx, keep `SECRET_KEY` in the environment, enable HTTPS, and use a persistent database path. The app is intentionally dependency-light so it can be deployed easily on a small VPS.
+## Production VPS
+
+The repository includes a Gunicorn process definition plus example Nginx and systemd configuration under `deploy/`. A typical Linux deployment is:
+
+```bash
+git clone https://github.com/siddharth45-coder/tasker.git /opt/tasker
+cd /opt/tasker
+python3 -m venv .venv
+. .venv/bin/activate
+pip install -r requirements.txt
+cp .env.example .env
+# edit .env and set SECRET_KEY
+sudo cp deploy/tasker.service /etc/systemd/system/tasker.service
+sudo cp deploy/nginx.conf /etc/nginx/sites-available/tasker
+sudo ln -s /etc/nginx/sites-available/tasker /etc/nginx/sites-enabled/tasker
+sudo systemctl daemon-reload
+sudo systemctl enable --now tasker
+sudo nginx -t && sudo systemctl reload nginx
+```
+
+Before exposing the site publicly, configure the real domain in Nginx and enable HTTPS. Do not commit the real `.env` file or the SQLite database.
