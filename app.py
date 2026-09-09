@@ -11,7 +11,10 @@ DB_PATH = os.path.join(DB_DIR, "tasker.db")
 
 app = Flask(__name__)
 app.config["SECRET_KEY"] = os.environ.get("SECRET_KEY", "tasker-dev-change-me")
-app.config["JSON_SORT_KEYS"] = False
+app.config["SESSION_COOKIE_HTTPONLY"] = True
+app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
+app.config["SESSION_COOKIE_SECURE"] = os.environ.get("COOKIE_SECURE", "0") == "1"
+app.config["MAX_CONTENT_LENGTH"] = 1024 * 1024
 
 
 def get_db():
@@ -20,6 +23,8 @@ def get_db():
         g.db = sqlite3.connect(DB_PATH)
         g.db.row_factory = sqlite3.Row
         g.db.execute("PRAGMA foreign_keys = ON")
+        g.db.execute("PRAGMA journal_mode = WAL")
+        g.db.execute("PRAGMA busy_timeout = 5000")
     return g.db
 
 
@@ -101,10 +106,24 @@ def seed_tasks(user_id):
         ("Database schema", "Create the first normalized SQLite schema.", "Mobile App", "medium", "done", (today - timedelta(days=2)).isoformat(), 100),
         ("Landing page copy", "Approve the final marketing copy.", "Marketing", "low", "done", (today - timedelta(days=3)).isoformat(), 100),
     ]
-    db.executemany("""INSERT INTO tasks
-        (user_id,title,description,project,priority,status,due_date,progress)
-        VALUES (?,?,?,?,?,?,?,?)""", [(user_id, *item) for item in samples])
+    db.executemany("INSERT INTO tasks (user_id,title,description,project,priority,status,due_date,progress) VALUES (?,?,?,?,?,?,?,?)", [(user_id, *item) for item in samples])
     db.commit()
+
+
+@app.after_request
+def security_headers(response):
+    response.headers.setdefault("X-Content-Type-Options", "nosniff")
+    response.headers.setdefault("X-Frame-Options", "SAMEORIGIN")
+    response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
+    response.headers.setdefault("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
+    return response
+
+
+@app.errorhandler(413)
+def too_large(_error):
+    if request.path.startswith("/api/"):
+        return jsonify({"error": "Request is too large"}), 413
+    return "Request is too large", 413
 
 
 @app.route("/")
@@ -139,7 +158,7 @@ def register():
         name = request.form.get("name", "").strip()
         email = request.form.get("email", "").strip().lower()
         password = request.form.get("password", "")
-        if len(name) < 2 or "@" not in email or len(password) < 6:
+        if len(name) < 2 or len(name) > 80 or "@" not in email or len(email) > 160 or len(password) < 6:
             error = "Enter a valid name, email and password (6+ characters)."
         else:
             db = get_db()
@@ -179,80 +198,65 @@ def list_tasks():
 def validate_task(data):
     title = str(data.get("title", "")).strip()
     if not title or len(title) > 120:
-        raise ValueError("Title is required and must be 120 characters or fewer.")
+        raise ValueError("Invalid title")
     priority = data.get("priority", "medium")
     status = data.get("status", "todo")
     if priority not in {"low", "medium", "high"} or status not in {"todo", "progress", "done"}:
-        raise ValueError("Invalid priority or status.")
+        raise ValueError("Invalid priority or status")
+    due = data.get("due") or None
+    if due:
+        try: date.fromisoformat(str(due))
+        except ValueError: raise ValueError("Invalid due date")
     progress = 100 if status == "done" else int(data.get("progress", 68 if status == "progress" else 40))
     progress = max(0, min(100, progress))
-    if status == "done": progress = 100
-    return (title, str(data.get("description", "")).strip()[:500], str(data.get("project", data.get("tag", "Personal"))).strip()[:60] or "Personal", priority, status, data.get("due") or None, progress)
+    return (title, str(data.get("description", "")).strip()[:500], str(data.get("project", data.get("tag", "Personal"))).strip()[:60] or "Personal", priority, status, due, progress)
 
 
 @app.post("/api/tasks")
 @login_required
 def create_task():
-    try:
-        values = validate_task(request.get_json(silent=True) or {})
-    except (ValueError, TypeError):
-        return jsonify({"error": "Invalid task data"}), 400
+    try: values = validate_task(request.get_json(silent=True) or {})
+    except (ValueError, TypeError): return jsonify({"error": "Invalid task data"}), 400
     db = get_db()
-    cur = db.execute("""INSERT INTO tasks (user_id,title,description,project,priority,status,due_date,progress,updated_at)
-        VALUES (?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP)""", (session["user_id"], *values))
+    cur = db.execute("INSERT INTO tasks (user_id,title,description,project,priority,status,due_date,progress,updated_at) VALUES (?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP)", (session["user_id"], *values))
     db.commit()
-    row = db.execute("SELECT * FROM tasks WHERE id = ?", (cur.lastrowid,)).fetchone()
+    row = db.execute("SELECT * FROM tasks WHERE id = ? AND user_id = ?", (cur.lastrowid, session["user_id"])).fetchone()
     return jsonify({"task": task_json(row)}), 201
 
 
 @app.put("/api/tasks/<int:task_id>")
 @login_required
 def update_task(task_id):
-    db = get_db()
-    existing = db.execute("SELECT * FROM tasks WHERE id = ? AND user_id = ?", (task_id, session["user_id"])).fetchone()
-    if not existing:
-        return jsonify({"error": "Task not found"}), 404
-    data = request.get_json(silent=True) or {}
-    merged = dict(data)
-    merged.setdefault("title", existing["title"]); merged.setdefault("description", existing["description"])
-    merged.setdefault("project", existing["project"]); merged.setdefault("priority", existing["priority"])
-    merged.setdefault("status", existing["status"]); merged.setdefault("due", existing["due_date"]); merged.setdefault("progress", existing["progress"])
-    try:
-        values = validate_task(merged)
-    except (ValueError, TypeError):
-        return jsonify({"error": "Invalid task data"}), 400
-    db.execute("""UPDATE tasks SET title=?,description=?,project=?,priority=?,status=?,due_date=?,progress=?,updated_at=CURRENT_TIMESTAMP
-        WHERE id=? AND user_id=?""", (*values, task_id, session["user_id"]))
+    db = get_db(); existing = db.execute("SELECT * FROM tasks WHERE id = ? AND user_id = ?", (task_id, session["user_id"])).fetchone()
+    if not existing: return jsonify({"error": "Task not found"}), 404
+    data = request.get_json(silent=True) or {}; merged = dict(data)
+    for key, column in (("title","title"),("description","description"),("project","project"),("priority","priority"),("status","status"),("due","due_date"),("progress","progress")):
+        merged.setdefault(key, existing[column])
+    try: values = validate_task(merged)
+    except (ValueError, TypeError): return jsonify({"error": "Invalid task data"}), 400
+    db.execute("UPDATE tasks SET title=?,description=?,project=?,priority=?,status=?,due_date=?,progress=?,updated_at=CURRENT_TIMESTAMP WHERE id=? AND user_id=?", (*values, task_id, session["user_id"]))
     db.commit()
-    row = db.execute("SELECT * FROM tasks WHERE id = ?", (task_id,)).fetchone()
+    row = db.execute("SELECT * FROM tasks WHERE id = ? AND user_id = ?", (task_id, session["user_id"])).fetchone()
     return jsonify({"task": task_json(row)})
 
 
 @app.delete("/api/tasks/<int:task_id>")
 @login_required
 def delete_task(task_id):
-    db = get_db()
-    cur = db.execute("DELETE FROM tasks WHERE id = ? AND user_id = ?", (task_id, session["user_id"]))
-    db.commit()
-    if cur.rowcount == 0:
-        return jsonify({"error": "Task not found"}), 404
+    db = get_db(); cur = db.execute("DELETE FROM tasks WHERE id = ? AND user_id = ?", (task_id, session["user_id"])); db.commit()
+    if cur.rowcount == 0: return jsonify({"error": "Task not found"}), 404
     return jsonify({"ok": True})
 
 
 @app.patch("/api/tasks/<int:task_id>/status")
 @login_required
 def move_task(task_id):
-    data = request.get_json(silent=True) or {}
-    status = data.get("status")
-    if status not in {"todo", "progress", "done"}:
-        return jsonify({"error": "Invalid status"}), 400
+    status = (request.get_json(silent=True) or {}).get("status")
+    if status not in {"todo", "progress", "done"}: return jsonify({"error": "Invalid status"}), 400
     progress = 100 if status == "done" else 68 if status == "progress" else 40
-    db = get_db()
-    cur = db.execute("UPDATE tasks SET status=?,progress=?,updated_at=CURRENT_TIMESTAMP WHERE id=? AND user_id=?", (status, progress, task_id, session["user_id"]))
-    db.commit()
-    if cur.rowcount == 0:
-        return jsonify({"error": "Task not found"}), 404
-    row = db.execute("SELECT * FROM tasks WHERE id=?", (task_id,)).fetchone()
+    db = get_db(); cur = db.execute("UPDATE tasks SET status=?,progress=?,updated_at=CURRENT_TIMESTAMP WHERE id=? AND user_id=?", (status, progress, task_id, session["user_id"])); db.commit()
+    if cur.rowcount == 0: return jsonify({"error": "Task not found"}), 404
+    row = db.execute("SELECT * FROM tasks WHERE id=? AND user_id=?", (task_id, session["user_id"])).fetchone()
     return jsonify({"task": task_json(row)})
 
 
