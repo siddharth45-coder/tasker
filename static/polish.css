@@ -17,7 +17,7 @@
 .dark .task-card:hover{border-color:#4c3b76}
 .task-card.completed{opacity:.82}
 .task-card.completed:hover{opacity:1}
-.task-card:focus-within{box-shadow:0 0 0 3px rgba(139,92,246,.12)}
+.task-card:focus-within,.task-card:focus-visible{box-shadow:0 0 0 3px rgba(139,92,246,.12);outline:none}
 .task-menu button{transition:background .15s,transform .15s}
 .task-menu button:active{transform:scale(.98)}
 .calendar-nav{min-width:40px;padding:0}
@@ -27,6 +27,18 @@
 .dark .analytics-card{background:rgba(17,24,39,.5)}
 .toast{max-width:min(360px,calc(100vw - 32px));backdrop-filter:blur(10px)}
 
+/* Functional UX states */
+.api-loading{display:flex;align-items:center;justify-content:center;gap:10px;min-height:52px;margin:0 0 12px;padding:12px 16px;border:1px solid rgba(139,92,246,.16);border-radius:14px;background:rgba(255,255,255,.72);color:var(--muted,#6b7280);font-size:13px;font-weight:600;backdrop-filter:blur(8px);animation:fadeIn .18s ease-out}
+.dark .api-loading{background:rgba(17,24,39,.72)}
+.loading-spinner{width:16px;height:16px;border:2px solid currentColor;border-right-color:transparent;border-radius:50%;animation:spin .7s linear infinite}
+.task-card[tabindex="0"]{cursor:pointer}
+.task-card[tabindex="0"]:focus-visible{border-color:rgba(139,92,246,.4)}
+.task-card button:focus-visible,.calendar-task:focus-visible,.control-btn:focus-visible,.auth-submit:focus-visible{outline:3px solid rgba(139,92,246,.28);outline-offset:2px}
+.task-form button[type="submit"]:disabled{cursor:wait;opacity:.65;transform:none;box-shadow:none}
+html.mutation-pending .save-btn{cursor:wait}
+@keyframes spin{to{transform:rotate(360deg)}}
+@keyframes fadeIn{from{opacity:0;transform:translateY(-4px)}to{opacity:1;transform:translateY(0)}}
+
 /* Touch-friendly mobile controls */
 @media(max-width:800px){
   .nav-item{min-height:54px}
@@ -35,6 +47,7 @@
   .task-menu{right:8px;top:38px;width:150px}
   .calendar-task{min-height:30px}
   .calendar-day{overflow:hidden}
+  .api-loading{margin-inline:0}
 }
 
 @media(max-width:480px){
@@ -50,4 +63,6 @@
 @media(prefers-reduced-motion:reduce){
   .nav-item::after{transition:none}
   .task-card,.calendar-task,.control-btn,.header-icon,.add-icon,.logout-btn{will-change:auto}
+  .loading-spinner{animation:none}
+  .api-loading{animation:none}
 }
